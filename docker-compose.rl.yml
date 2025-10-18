@@ -1,0 +1,54 @@
+version: '3.8'
+
+services:
+  vlm-rl-training:
+    build:
+      context: .
+      dockerfile: Dockerfile.rl
+    image: vlm-object-counting-rl:latest
+    container_name: vlm-rl-training
+
+    # GPU configuration
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+    # Mount volumes
+    volumes:
+      # Mount data directory (your videos and ground truth)
+      - ./data:/workspace/data
+      # Mount notebooks directory
+      - ./notebooks:/workspace/notebooks
+      # Mount outputs directory
+      - ./outputs_grpo_object_counting:/workspace/outputs_grpo_object_counting
+      # Optional: Mount model cache to avoid re-downloading
+      - ~/.cache/huggingface:/root/.cache/huggingface
+
+    # Port mappings
+    ports:
+      - "8888:8888"  # Jupyter Lab
+      - "6006:6006"  # TensorBoard
+
+    # Environment variables
+    environment:
+      - CUDA_VISIBLE_DEVICES=0
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - TRANSFORMERS_CACHE=/root/.cache/huggingface
+      - HF_HOME=/root/.cache/huggingface
+      # Uncomment to use Weights & Biases
+      # - WANDB_API_KEY=your_wandb_key_here
+
+    # Shared memory size (important for PyTorch DataLoader with multiple workers)
+    shm_size: '16gb'
+
+    # Keep container running
+    stdin_open: true
+    tty: true
+
+    # Network mode
+    network_mode: "bridge"
