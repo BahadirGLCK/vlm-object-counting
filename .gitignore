@@ -118,6 +118,8 @@ ENV/
 # OHSVU Specific
 # Ignore the entire data directory as requested
 data/
+experiment_output/
+vlm-countin-app/
 
 # Ignore experiment outputs if you don't want to track them in Git
 # (though sometimes it's useful to track config snapshots or metrics files)
