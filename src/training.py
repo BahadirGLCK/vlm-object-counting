@@ -1,6 +1,7 @@
 import random
 import pathlib
 import logging
+import re
 from tqdm import tqdm
 import pandas as pd
 # from datasets import Dataset # Dataset class is not directly used, examples are lists of dicts
@@ -216,6 +217,99 @@ class Trainer:
         self.logger.info("Training finished.")
         return self.model 
 
+    @staticmethod
+    def _sanitize_ollama_model_name(raw_name: str) -> str:
+        """
+        Sanitizes model names for Ollama tags.
+        Ollama model names are lowercase and generally should avoid spaces/symbols.
+        """
+        sanitized = re.sub(r"[^a-z0-9._-]+", "-", raw_name.lower()).strip("-")
+        return sanitized or "model"
+
+    def _build_ollama_model_name(self, gguf_file: pathlib.Path) -> str:
+        """
+        Builds an Ollama model name from the configured prefix and GGUF quant suffix.
+        """
+        configured_prefix = str(getattr(self.config, "OLLAMA_MODEL_NAME_PREFIX", "")).strip()
+        base_prefix = configured_prefix or self.exp_manager.current_experiment_path.name
+        base_prefix = self._sanitize_ollama_model_name(base_prefix)
+        quant_suffix = self._sanitize_ollama_model_name(gguf_file.stem.split(".")[-1])
+        return f"{base_prefix}-{quant_suffix}"
+
+    def save_ollama_artifacts(self, finetuned_model_dir: pathlib.Path) -> None:
+        """
+        Exports GGUF files via Unsloth and generates Ollama Modelfiles + helper commands.
+        """
+        if not getattr(self.config, "ENABLE_OLLAMA_EXPORT", False):
+            self.logger.info("Skipping Ollama export because ENABLE_OLLAMA_EXPORT is False.")
+            return
+
+        if not hasattr(self.model, "save_pretrained_gguf"):
+            raise AttributeError(
+                "Model does not expose save_pretrained_gguf(). "
+                "Upgrade Unsloth or disable ENABLE_OLLAMA_EXPORT."
+            )
+
+        quantization_methods = getattr(self.config, "OLLAMA_GGUF_QUANTIZATION_METHODS", ["q4_k_m"])
+        if isinstance(quantization_methods, str):
+            quantization_methods = [quantization_methods]
+        quantization_methods = [str(m).strip() for m in quantization_methods if str(m).strip()]
+        if not quantization_methods:
+            self.logger.warning("OLLAMA_GGUF_QUANTIZATION_METHODS is empty. Skipping Ollama export.")
+            return
+
+        ollama_export_dir_name = str(getattr(self.config, "OLLAMA_EXPORT_DIR_NAME", "ollama")).strip() or "ollama"
+        ollama_export_dir = finetuned_model_dir / ollama_export_dir_name
+        ollama_export_dir.mkdir(parents=True, exist_ok=True)
+
+        for quant_method in quantization_methods:
+            self.logger.info(f"Saving GGUF for Ollama with quantization '{quant_method}' to: {ollama_export_dir}")
+            self.model.save_pretrained_gguf(
+                str(ollama_export_dir),
+                self.tokenizer,
+                quantization_method=quant_method,
+            )
+
+        gguf_files = sorted(ollama_export_dir.glob("*.gguf"))
+        if not gguf_files:
+            raise FileNotFoundError(
+                f"Ollama export was requested, but no .gguf files were found in {ollama_export_dir}."
+            )
+
+        modelfile_parameters = getattr(self.config, "OLLAMA_MODELFILE_PARAMETERS", {}) or {}
+        ollama_namespace = str(getattr(self.config, "OLLAMA_LIBRARY_NAMESPACE", "")).strip().strip("/")
+
+        command_lines = [f"# Run commands from inside: {ollama_export_dir}"]
+        created_model_names = []
+
+        for gguf_file in gguf_files:
+            model_name = self._build_ollama_model_name(gguf_file)
+            modelfile_name = f"Modelfile.{model_name}"
+            modelfile_path = ollama_export_dir / modelfile_name
+
+            modelfile_lines = [f"FROM ./{gguf_file.name}"]
+            for parameter_name, parameter_value in modelfile_parameters.items():
+                if parameter_value is not None:
+                    modelfile_lines.append(f"PARAMETER {parameter_name} {parameter_value}")
+
+            modelfile_path.write_text("\n".join(modelfile_lines) + "\n", encoding="utf-8")
+
+            command_lines.append(f"ollama create {model_name} -f {modelfile_name}")
+            command_lines.append(f"ollama run {model_name}")
+            if ollama_namespace:
+                library_model_name = f"{ollama_namespace}/{model_name}"
+                command_lines.append(f"ollama cp {model_name} {library_model_name}")
+                command_lines.append(f"ollama push {library_model_name}")
+            command_lines.append("")
+            created_model_names.append(model_name)
+
+        commands_path = ollama_export_dir / "ollama_commands.txt"
+        commands_path.write_text("\n".join(command_lines).rstrip() + "\n", encoding="utf-8")
+        self.logger.info(
+            f"Ollama artifacts saved to: {ollama_export_dir}. "
+            f"Generated models: {created_model_names}. Command helper: {commands_path}"
+        )
+
     def save_model_artifacts(self) -> None:
         """
         Saves the finetuned LoRA adapter, tokenizer, and the merged 16-bit model
@@ -243,6 +337,17 @@ class Trainer:
         
         self.logger.info(f"Saving merged 16-bit model to: {merged_model_path}")
         self.model.save_pretrained_merged(str(merged_model_path), self.tokenizer)
+
+        try:
+            self.save_ollama_artifacts(finetuned_model_dir)
+        except Exception as e:
+            if getattr(self.config, "FAIL_ON_OLLAMA_EXPORT_ERROR", False):
+                raise
+            self.logger.error(
+                f"Ollama export failed, continuing because FAIL_ON_OLLAMA_EXPORT_ERROR is False. Error: {e}",
+                exc_info=True,
+            )
+
         self.logger.info("Model artifacts saving complete.")
 
     def run_training_pipeline(self, continue_experiment: str | None = None, checkpoint_path: str | None = None) -> pathlib.Path:
