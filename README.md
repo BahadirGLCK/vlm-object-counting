@@ -16,7 +16,8 @@ vlm-object-counting/
 │   └── YYYY-MM-DD_HH-MM-SS_finetune/ # Example experiment directory
 │       ├── experiment_config.json    # Snapshot of config used for this run
 │       ├── data_split/               # Information about data splits (e.g., test_video_names.txt)
-│       ├── finetuned_model/          # Saved model checkpoints (LoRA, tokenizer, merged)
+│       ├── finetuned_model/          # Saved model checkpoints (LoRA, tokenizer, merged, Ollama/GGUF)
+│       │   └── ollama/               # GGUF files + Modelfiles + helper ollama commands
 │       └── evaluation_results/       # Outputs from the evaluation process
 ├── notebooks/              # Jupyter notebooks for experimentation and analysis
 ├── requirements.txt        # Project dependencies
@@ -191,6 +192,35 @@ You can also run finetuning or evaluation as standalone processes:
     python scripts/run_evaluation.py experiments/YYYY-MM-DD_HH-MM-SS_finetune
     ```
     (Replace `experiments/YYYY-MM-DD_HH-MM-SS_finetune` with the path to the experiment you want to evaluate.)
+
+### Ollama Export (via Finetuning Pipeline)
+
+The training pipeline now keeps existing exports and also creates Ollama-ready artifacts using Unsloth GGUF export:
+
+*   Existing exports are still saved:
+    *   LoRA checkpoint
+    *   Tokenizer
+    *   Merged 16-bit model
+*   New Ollama exports are saved under:
+    *   `experiments/<run>/finetuned_model/ollama/`
+    *   Includes `.gguf` files, generated `Modelfile.*` files, and `ollama_commands.txt`.
+
+Configuration lives in `src/config.py`:
+
+*   `ENABLE_OLLAMA_EXPORT`
+*   `OLLAMA_GGUF_QUANTIZATION_METHODS`
+*   `OLLAMA_MODEL_NAME_PREFIX`
+*   `OLLAMA_LIBRARY_NAMESPACE` (optional, for `ollama push`)
+*   `OLLAMA_MODELFILE_PARAMETERS`
+
+After finetuning, run the generated helper commands:
+
+```bash
+cd experiments/<run>/finetuned_model/ollama
+cat ollama_commands.txt
+```
+
+This follows the official Ollama flow (`Modelfile` with `FROM ./model.gguf`, then `ollama create` and optional `ollama push`).
 
 ## Contributing
 

@@ -120,6 +120,7 @@ ENV/
 data/
 experiment_output/
 vlm-countin-app/
+vlm-counting-ollama-app/runtime/
 
 # Ignore experiment outputs if you don't want to track them in Git
 # (though sometimes it's useful to track config snapshots or metrics files)

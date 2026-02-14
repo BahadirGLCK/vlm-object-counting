@@ -87,6 +87,23 @@ EVAL_GENERATION_CONFIG = {
     "top_p": 0.95,
 }
 
+# --- Optional Ollama / GGUF Export ---
+# Uses Unsloth's save_pretrained_gguf() and prepares Modelfiles for Ollama.
+ENABLE_OLLAMA_EXPORT = True
+OLLAMA_EXPORT_DIR_NAME = "ollama"
+# Valid methods are provided by Unsloth, e.g. "q4_k_m", "q8_0", "f16", ...
+OLLAMA_GGUF_QUANTIZATION_METHODS = ["q4_k_m"]
+OLLAMA_MODEL_NAME_PREFIX = "vlm-object-counting"
+# Optional namespace for `ollama push`, example: "my-username".
+OLLAMA_LIBRARY_NAMESPACE = ""
+OLLAMA_MODELFILE_PARAMETERS = {
+    "num_ctx": MAX_SEQ_LEN_EVAL,
+    "temperature": EVAL_GENERATION_CONFIG["temperature"],
+    "top_p": EVAL_GENERATION_CONFIG["top_p"],
+}
+# If True, pipeline fails when Ollama export fails. If False, it logs and continues.
+FAIL_ON_OLLAMA_EXPORT_ERROR = False
+
 # --- Data Splitting (for finetuning script) ---
 TRAIN_SPLIT_RATIO = 0.75
 EVAL_SPLIT_RATIO = 0.15
